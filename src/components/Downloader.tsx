@@ -16,9 +16,10 @@ import {
 } from "lucide-react";
 import {
   cn,
-  isValidYouTubeUrl,
+  isValidMediaUrl,
   extractVideoId,
-  normalizeYouTubeUrl,
+  normalizeMediaUrl,
+  isYouTubeUrl,
 } from "@/lib/utils";
 
 type FormatType = "video" | "audio";
@@ -93,11 +94,11 @@ export function Downloader() {
   const apiBase = getApiBase();
 
   const fetchInfo = useCallback(async () => {
-    if (!isValidYouTubeUrl(url)) {
+    if (!isValidMediaUrl(url)) {
       setState({
         status: "error",
         progress: 0,
-        message: "Please enter a valid YouTube URL",
+        message: "Please enter a valid YouTube or Instagram URL",
       });
       return;
     }
@@ -111,7 +112,7 @@ export function Downloader() {
       return;
     }
 
-    const normalized = normalizeYouTubeUrl(url);
+    const normalized = normalizeMediaUrl(url);
     setState({ status: "fetching", progress: 0 });
     setInfo(null);
 
@@ -132,7 +133,7 @@ export function Downloader() {
       const msg =
         e instanceof Error ? e.message : "Could not fetch video details";
       const id = extractVideoId(url);
-      if (id) {
+      if (id && isYouTubeUrl(url)) {
         setInfo({
           title: "YouTube Video",
           thumbnail: `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
@@ -186,7 +187,10 @@ export function Downloader() {
           if (
             m.includes("failed") ||
             m.includes("Could not download") ||
-            m.includes("timed out")
+            m.includes("timed out") ||
+            m.includes("blocked") ||
+            m.includes("unavailable") ||
+            m.includes("Instagram")
           ) {
             throw err;
           }
@@ -198,7 +202,7 @@ export function Downloader() {
 
   const startDownload = useCallback(async () => {
     if (!info || !url || !apiBase) return;
-    const normalized = normalizeYouTubeUrl(url);
+    const normalized = normalizeMediaUrl(url);
     setState({
       status: "downloading",
       progress: 5,
@@ -349,7 +353,7 @@ export function Downloader() {
                   setInfo(null);
                 }
               }}
-              placeholder="Paste YouTube URL here..."
+              placeholder="Paste YouTube or Instagram Reel URL..."
               className={cn(
                 "w-full rounded-xl border border-border bg-muted/40 pl-10 pr-3 py-3 text-sm text-foreground",
                 "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
@@ -553,7 +557,7 @@ export function Downloader() {
       </motion.div>
 
       <p className="mt-4 text-center text-[11px] text-muted-foreground max-w-sm mx-auto">
-        For personal use only. Respect copyright and YouTube Terms of Service.
+        For personal use only. Respect copyright and platform Terms of Service.
       </p>
     </div>
   );
