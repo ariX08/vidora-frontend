@@ -12,11 +12,25 @@ import {
   AlertCircle,
   Sparkles,
   ExternalLink,
+  X,
 } from "lucide-react";
-import { cn, isValidYouTubeUrl, extractVideoId } from "@/lib/utils";
+import {
+  cn,
+  isValidYouTubeUrl,
+  extractVideoId,
+  normalizeYouTubeUrl,
+} from "@/lib/utils";
 
 type FormatType = "video" | "audio";
-type Quality = "best" | "1080p" | "720p" | "480p" | "360p" | "128k" | "192k" | "320k";
+type Quality =
+  | "best"
+  | "1080p"
+  | "720p"
+  | "480p"
+  | "360p"
+  | "128k"
+  | "192k"
+  | "320k";
 
 interface VideoInfo {
   title: string;
@@ -71,24 +85,33 @@ export function Downloader() {
   const [formatType, setFormatType] = useState<FormatType>("video");
   const [quality, setQuality] = useState<Quality>("best");
   const [info, setInfo] = useState<VideoInfo | null>(null);
-  const [state, setState] = useState<DownloadState>({ status: "idle", progress: 0 });
+  const [state, setState] = useState<DownloadState>({
+    status: "idle",
+    progress: 0,
+  });
 
   const apiBase = getApiBase();
 
   const fetchInfo = useCallback(async () => {
     if (!isValidYouTubeUrl(url)) {
-      setState({ status: "error", progress: 0, message: "Please enter a valid YouTube URL" });
+      setState({
+        status: "error",
+        progress: 0,
+        message: "Please enter a valid YouTube URL",
+      });
       return;
     }
     if (!apiBase) {
       setState({
         status: "error",
         progress: 0,
-        message: "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel.",
+        message:
+          "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel.",
       });
       return;
     }
 
+    const normalized = normalizeYouTubeUrl(url);
     setState({ status: "fetching", progress: 0 });
     setInfo(null);
 
@@ -96,7 +119,7 @@ export function Downloader() {
       const res = await fetch(`${apiBase}/api/info`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: normalized }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -106,13 +129,14 @@ export function Downloader() {
       setInfo(data);
       setState({ status: "ready", progress: 0 });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Could not fetch video details";
+      const msg =
+        e instanceof Error ? e.message : "Could not fetch video details";
       const id = extractVideoId(url);
       if (id) {
         setInfo({
           title: "YouTube Video",
           thumbnail: `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
-          duration: "\u2014",
+          duration: "-",
           uploader: "YouTube",
         });
       }
@@ -141,16 +165,29 @@ export function Downloader() {
         }));
         if (data.status === "completed" && data.downloadUrl) {
           const filename = data.filename || "vidora-download";
-          setState((s) => ({ ...s, progress: 95, message: "Saving file\u2026" }));
-          const objectUrl = await triggerBlobDownload(data.downloadUrl, filename);
-          setState({ status: "success", progress: 100, downloadUrl: objectUrl, filename });
+          setState((s) => ({ ...s, progress: 95, message: "Saving file..." }));
+          const objectUrl = await triggerBlobDownload(
+            data.downloadUrl,
+            filename
+          );
+          setState({
+            status: "success",
+            progress: 100,
+            downloadUrl: objectUrl,
+            filename,
+          });
           return;
         }
-        if (data.status === "failed") throw new Error(data.error || "Processing failed");
+        if (data.status === "failed")
+          throw new Error(data.error || "Processing failed");
       } catch (err) {
         if (err instanceof Error) {
           const m = err.message;
-          if (m.includes("failed") || m.includes("Could not download") || m.includes("timed out")) {
+          if (
+            m.includes("failed") ||
+            m.includes("Could not download") ||
+            m.includes("timed out")
+          ) {
             throw err;
           }
         }
@@ -161,12 +198,21 @@ export function Downloader() {
 
   const startDownload = useCallback(async () => {
     if (!info || !url || !apiBase) return;
-    setState({ status: "downloading", progress: 5, message: "Starting download\u2026" });
+    const normalized = normalizeYouTubeUrl(url);
+    setState({
+      status: "downloading",
+      progress: 5,
+      message: "Starting download...",
+    });
     try {
       const res = await fetch(`${apiBase}/api/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim(), type: formatType, quality }),
+        body: JSON.stringify({
+          url: normalized,
+          type: formatType,
+          quality,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -177,8 +223,16 @@ export function Downloader() {
         const data = await res.json();
         if (data.downloadUrl) {
           const filename = data.filename || "vidora-download";
-          const objectUrl = await triggerBlobDownload(data.downloadUrl, filename);
-          setState({ status: "success", progress: 100, downloadUrl: objectUrl, filename });
+          const objectUrl = await triggerBlobDownload(
+            data.downloadUrl,
+            filename
+          );
+          setState({
+            status: "success",
+            progress: 100,
+            downloadUrl: objectUrl,
+            filename,
+          });
         } else if (data.jobId) {
           await pollJob(data.jobId);
         }
@@ -188,8 +242,11 @@ export function Downloader() {
         let filename = "vidora-download";
         const disposition = res.headers.get("content-disposition");
         if (disposition) {
-          const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^\";]+)/i);
-          if (match) filename = decodeURIComponent(match[1].replace(/"/g, ""));
+          const match = disposition.match(
+            /filename\*?=(?:UTF-8''|")?([^\";]+)/i
+          );
+          if (match)
+            filename = decodeURIComponent(match[1].replace(/"/g, ""));
         }
         const a = document.createElement("a");
         a.href = objectUrl;
@@ -198,21 +255,33 @@ export function Downloader() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
-        setState({ status: "success", progress: 100, downloadUrl: objectUrl, filename });
+        setState({
+          status: "success",
+          progress: 100,
+          downloadUrl: objectUrl,
+          filename,
+        });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Download failed";
       setState({
         status: "error",
         progress: 0,
-        message: msg === "Failed to fetch" ? `Cannot reach backend at ${apiBase}.` : msg,
+        message:
+          msg === "Failed to fetch"
+            ? `Cannot reach backend at ${apiBase}.`
+            : msg,
       });
     }
   }, [info, url, formatType, quality, apiBase]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (state.status === "ready" || state.status === "success" || (state.status === "error" && info)) {
+    if (
+      state.status === "ready" ||
+      state.status === "success" ||
+      (state.status === "error" && info)
+    ) {
       startDownload();
     } else {
       fetchInfo();
@@ -233,7 +302,6 @@ export function Downloader() {
         animate={{ opacity: 1, y: 0 }}
         className="rounded-2xl bg-card border border-border shadow-xl shadow-violet-500/5 overflow-hidden"
       >
-        {/* Video preview at TOP so it is always visible without scrolling */}
         <AnimatePresence>
           {info && (
             <motion.div
@@ -245,7 +313,11 @@ export function Downloader() {
               <div className="p-4 flex gap-3 items-center">
                 <div className="relative w-24 sm:w-28 shrink-0 aspect-video rounded-lg overflow-hidden bg-muted">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={info.thumbnail} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={info.thumbnail}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="font-semibold text-sm leading-snug line-clamp-2 text-foreground">
@@ -253,15 +325,8 @@ export function Downloader() {
                   </h3>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {info.uploader}
-                    {info.duration !== "\u2014" && ` \u00b7 ${info.duration}`}
+                    {info.duration !== "-" && ` - ${info.duration}`}
                   </p>
-                  <button
-                    type="button"
-                    onClick={reset}
-                    className="mt-1.5 text-xs font-medium text-primary hover:underline"
-                  >
-                    Clear & start over
-                  </button>
                 </div>
               </div>
             </motion.div>
@@ -274,7 +339,8 @@ export function Downloader() {
               <Link2 className="h-4 w-4" />
             </div>
             <input
-              type="url"
+              type="text"
+              inputMode="url"
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);
@@ -283,12 +349,14 @@ export function Downloader() {
                   setInfo(null);
                 }
               }}
-              placeholder="Paste YouTube URL here\u2026"
+              placeholder="Paste YouTube URL here..."
               className={cn(
                 "w-full rounded-xl border border-border bg-muted/40 pl-10 pr-3 py-3 text-sm text-foreground",
                 "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
               )}
-              disabled={state.status === "fetching" || state.status === "downloading"}
+              disabled={
+                state.status === "fetching" || state.status === "downloading"
+              }
             />
           </div>
 
@@ -332,64 +400,97 @@ export function Downloader() {
               Quality
             </label>
             <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-              {(formatType === "video" ? VIDEO_QUALITIES : AUDIO_QUALITIES).map((q) => (
-                <button
-                  key={q.value}
-                  type="button"
-                  onClick={() => setQuality(q.value)}
-                  className={cn(
-                    "rounded-lg border px-2 py-1.5 text-xs transition-all",
-                    quality === q.value
-                      ? "border-primary bg-primary/10 text-primary font-medium"
-                      : "border-border bg-card text-muted-foreground hover:border-primary/40"
-                  )}
-                >
-                  {q.label}
-                </button>
-              ))}
+              {(formatType === "video" ? VIDEO_QUALITIES : AUDIO_QUALITIES).map(
+                (q) => (
+                  <button
+                    key={q.value}
+                    type="button"
+                    onClick={() => setQuality(q.value)}
+                    className={cn(
+                      "rounded-lg border px-2 py-1.5 text-xs transition-all",
+                      quality === q.value
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border bg-card text-muted-foreground hover:border-primary/40"
+                    )}
+                  >
+                    {q.label}
+                  </button>
+                )
+              )}
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={!url.trim() || state.status === "fetching" || state.status === "downloading"}
-            className={cn(
-              "w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white",
-              "bg-gradient-to-r from-violet-600 via-purple-600 to-cyan-500",
-              "hover:opacity-95 shadow-lg shadow-violet-500/20 transition-all",
-              "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={
+                !url.trim() ||
+                state.status === "fetching" ||
+                state.status === "downloading"
+              }
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white",
+                "bg-gradient-to-r from-violet-600 via-purple-600 to-cyan-500",
+                "hover:opacity-95 shadow-lg shadow-violet-500/20 transition-all",
+                "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+              )}
+            >
+              {state.status === "fetching" && (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Fetching info...
+                </>
+              )}
+              {state.status === "downloading" && (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Processing...{" "}
+                  {state.progress}%
+                </>
+              )}
+              {(state.status === "idle" ||
+                (state.status === "error" && !info)) && (
+                <>
+                  <Sparkles className="h-4 w-4" /> Get Video Info
+                </>
+              )}
+              {(state.status === "ready" || state.status === "success") && (
+                <>
+                  <Download className="h-4 w-4" /> Download{" "}
+                  {formatType === "audio" ? "MP3" : "Video"}
+                </>
+              )}
+              {state.status === "error" && info && (
+                <>
+                  <Download className="h-4 w-4" /> Retry Download
+                </>
+              )}
+            </button>
+
+            {(info || url.trim()) && (
+              <button
+                type="button"
+                onClick={reset}
+                disabled={
+                  state.status === "fetching" || state.status === "downloading"
+                }
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded-xl px-4 py-3 text-sm font-medium",
+                  "border border-border bg-muted/50 text-muted-foreground",
+                  "hover:bg-muted hover:text-foreground transition-colors",
+                  "disabled:opacity-50 disabled:cursor-not-allowed"
+                )}
+                title="Clear and start over"
+              >
+                <X className="h-4 w-4" />
+                <span className="hidden sm:inline">Clear</span>
+              </button>
             )}
-          >
-            {state.status === "fetching" && (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Fetching info\u2026
-              </>
-            )}
-            {state.status === "downloading" && (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Processing\u2026 {state.progress}%
-              </>
-            )}
-            {(state.status === "idle" || (state.status === "error" && !info)) && (
-              <>
-                <Sparkles className="h-4 w-4" /> Get Video Info
-              </>
-            )}
-            {(state.status === "ready" || state.status === "success") && (
-              <>
-                <Download className="h-4 w-4" /> Download {formatType === "audio" ? "MP3" : "Video"}
-              </>
-            )}
-            {state.status === "error" && info && (
-              <>
-                <Download className="h-4 w-4" /> Retry Download
-              </>
-            )}
-          </button>
+          </div>
         </form>
 
         <AnimatePresence>
-          {(state.status === "downloading" || state.status === "error" || state.status === "success") && (
+          {(state.status === "downloading" ||
+            state.status === "error" ||
+            state.status === "success") && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
@@ -400,8 +501,12 @@ export function Downloader() {
                 {state.status === "downloading" && (
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">{state.message}</span>
-                      <span className="font-medium text-primary">{state.progress}%</span>
+                      <span className="text-muted-foreground">
+                        {state.message}
+                      </span>
+                      <span className="font-medium text-primary">
+                        {state.progress}%
+                      </span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <motion.div
@@ -416,7 +521,9 @@ export function Downloader() {
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-medium">Something went wrong</p>
-                      <p className="text-red-400/90 text-xs mt-0.5">{state.message}</p>
+                      <p className="text-red-400/90 text-xs mt-0.5">
+                        {state.message}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -424,7 +531,9 @@ export function Downloader() {
                   <div className="flex items-center justify-between gap-2 text-sm">
                     <div className="flex items-center gap-2 text-emerald-500">
                       <CheckCircle2 className="h-4 w-4" />
-                      <span className="font-medium">Saved to your downloads</span>
+                      <span className="font-medium">
+                        Saved to your downloads
+                      </span>
                     </div>
                     {state.downloadUrl && (
                       <a
