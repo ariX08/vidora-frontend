@@ -48,6 +48,11 @@ const AUDIO_QUALITIES: { value: Quality; label: string }[] = [
   { value: "128k", label: "128 kbps" },
 ];
 
+function getApiBase() {
+  const raw = process.env.NEXT_PUBLIC_API_URL || "";
+  return raw.replace(/\/$/, "");
+}
+
 export function Downloader() {
   const [url, setUrl] = useState("");
   const [formatType, setFormatType] = useState<FormatType>("video");
@@ -55,11 +60,20 @@ export function Downloader() {
   const [info, setInfo] = useState<VideoInfo | null>(null);
   const [state, setState] = useState<DownloadState>({ status: "idle", progress: 0 });
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+  const apiBase = getApiBase();
 
   const fetchInfo = useCallback(async () => {
     if (!isValidYouTubeUrl(url)) {
       setState({ status: "error", progress: 0, message: "Please enter a valid YouTube URL" });
+      return;
+    }
+
+    if (!apiBase) {
+      setState({
+        status: "error",
+        progress: 0,
+        message: "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel to your Railway URL.",
+      });
       return;
     }
 
@@ -82,30 +96,82 @@ export function Downloader() {
       setInfo(data);
       setState({ status: "ready", progress: 0 });
     } catch (e) {
-      // Fallback: basic client-side extraction for UX when backend is offline
+      const msg = e instanceof Error ? e.message : "Could not fetch video details";
+      // Still show a basic preview so the UI isn't empty
       const id = extractVideoId(url);
       if (id) {
         setInfo({
           title: "YouTube Video",
           thumbnail: `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
-          duration: "—",
+          duration: "\u2014",
           uploader: "YouTube",
         });
-        setState({ status: "ready", progress: 0 });
-      } else {
-        setState({
-          status: "error",
-          progress: 0,
-          message: e instanceof Error ? e.message : "Could not fetch video details",
-        });
       }
+      setState({
+        status: "error",
+        progress: 0,
+        message:
+          msg === "Failed to fetch"
+            ? `Cannot reach backend at ${apiBase}. Check NEXT_PUBLIC_API_URL and that Railway is online.`
+            : msg,
+      });
     }
   }, [url, apiBase]);
+
+  const pollJob = async (jobId: string) => {
+    const maxAttempts = 120;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const res = await fetch(`${apiBase}/api/job/${jobId}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        setState((s) => ({
+          ...s,
+          progress: data.progress || s.progress,
+          message: data.message || s.message,
+        }));
+        if (data.status === "completed" && data.downloadUrl) {
+          setState({
+            status: "success",
+            progress: 100,
+            downloadUrl: data.downloadUrl,
+            filename: data.filename,
+          });
+          const a = document.createElement("a");
+          a.href = data.downloadUrl;
+          a.download = data.filename || "download";
+          a.click();
+          return;
+        }
+        if (data.status === "failed") {
+          throw new Error(data.error || "Processing failed");
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message !== "Failed to fetch") {
+          // only rethrow real job failures, keep polling on network blips
+          if (String(err.message).includes("Processing") || String(err.message).includes("failed")) {
+            throw err;
+          }
+        }
+      }
+    }
+    throw new Error("Download timed out");
+  };
 
   const startDownload = useCallback(async () => {
     if (!info || !url) return;
 
-    setState({ status: "downloading", progress: 5, message: "Starting download…" });
+    if (!apiBase) {
+      setState({
+        status: "error",
+        progress: 0,
+        message: "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel.",
+      });
+      return;
+    }
+
+    setState({ status: "downloading", progress: 5, message: "Starting download\u2026" });
 
     try {
       const res = await fetch(`${apiBase}/api/download`, {
@@ -147,7 +213,7 @@ export function Downloader() {
         const disposition = res.headers.get("content-disposition");
         let filename = "vidora-download";
         if (disposition) {
-          const match = disposition.match(/filename="?([^"]+)"?/);
+          const match = disposition.match(/filename="?([^\"]+)"?/);
           if (match) filename = match[1];
         }
         setState({
@@ -162,59 +228,25 @@ export function Downloader() {
         a.click();
       }
     } catch (e) {
+      const msg = e instanceof Error ? e.message : "Download failed";
       setState({
         status: "error",
         progress: 0,
-        message: e instanceof Error ? e.message : "Download failed. Is the backend running?",
+        message:
+          msg === "Failed to fetch"
+            ? `Cannot reach backend at ${apiBase}. Is Railway online?`
+            : msg,
       });
     }
   }, [info, url, formatType, quality, apiBase]);
 
-  const pollJob = async (jobId: string) => {
-    const maxAttempts = 120;
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 1500));
-      try {
-        const res = await fetch(`${apiBase}/api/job/${jobId}`);
-        if (!res.ok) continue;
-        const data = await res.json();
-        setState((s) => ({
-          ...s,
-          progress: data.progress || s.progress,
-          message: data.message || s.message,
-        }));
-        if (data.status === "completed" && data.downloadUrl) {
-          setState({
-            status: "success",
-            progress: 100,
-            downloadUrl: data.downloadUrl,
-            filename: data.filename,
-          });
-          const a = document.createElement("a");
-          a.href = data.downloadUrl;
-          a.download = data.filename || "download";
-          a.click();
-          return;
-        }
-        if (data.status === "failed") {
-          throw new Error(data.error || "Processing failed");
-        }
-      } catch {
-        // continue
-      }
-    }
-    throw new Error("Download timed out");
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (state.status === "ready" || state.status === "success" || state.status === "error") {
-      if (info) {
-        startDownload();
-      } else {
-        fetchInfo();
-      }
-    } else if (state.status === "idle") {
+    if (state.status === "ready" || state.status === "success") {
+      startDownload();
+    } else if (state.status === "error" && info) {
+      startDownload();
+    } else {
       fetchInfo();
     }
   };
@@ -249,7 +281,7 @@ export function Downloader() {
                   setInfo(null);
                 }
               }}
-              placeholder="Paste YouTube URL here…"
+              placeholder="Paste YouTube URL here\u2026"
               className={cn(
                 "w-full rounded-xl border border-border bg-muted/40 pl-11 pr-4 py-3.5 text-[15px]",
                 "placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400",
@@ -335,16 +367,16 @@ export function Downloader() {
             {state.status === "fetching" && (
               <>
                 <Loader2 className="h-5 w-5 animate-spin" />
-                Fetching info…
+                Fetching info\u2026
               </>
             )}
             {state.status === "downloading" && (
               <>
                 <Loader2 className="h-5 w-5 animate-spin" />
-                Processing… {state.progress}%
+                Processing\u2026 {state.progress}%
               </>
             )}
-            {(state.status === "idle" || state.status === "error") && !info && (
+            {(state.status === "idle" || (state.status === "error" && !info)) && (
               <>
                 <Sparkles className="h-5 w-5" />
                 Get Video Info
@@ -377,7 +409,7 @@ export function Downloader() {
                 {state.status === "downloading" && (
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span className="text-foreground/70">{state.message || "Working…"}</span>
+                      <span className="text-foreground/70">{state.message || "Working\u2026"}</span>
                       <span className="font-medium text-violet-600">{state.progress}%</span>
                     </div>
                     <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -444,7 +476,7 @@ export function Downloader() {
                   </h3>
                   <p className="mt-1 text-sm text-foreground/50">
                     {info.uploader}
-                    {info.duration !== "—" && ` · ${info.duration}`}
+                    {info.duration !== "\u2014" && ` \u00b7 ${info.duration}`}
                   </p>
                   <button
                     type="button"
