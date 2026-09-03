@@ -53,6 +53,23 @@ function getApiBase() {
   return raw.replace(/\/$/, "");
 }
 
+/** Fetch a cross-origin file as a blob and trigger a real browser download */
+async function triggerBlobDownload(fileUrl: string, filename: string) {
+  const res = await fetch(fileUrl);
+  if (!res.ok) throw new Error("Could not download the file from the server");
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename || "vidora-download";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke after a short delay so the download can start
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+  return objectUrl;
+}
+
 export function Downloader() {
   const [url, setUrl] = useState("");
   const [formatType, setFormatType] = useState<FormatType>("video");
@@ -97,7 +114,6 @@ export function Downloader() {
       setState({ status: "ready", progress: 0 });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not fetch video details";
-      // Still show a basic preview so the UI isn't empty
       const id = extractVideoId(url);
       if (id) {
         setInfo({
@@ -131,26 +147,39 @@ export function Downloader() {
           progress: data.progress || s.progress,
           message: data.message || s.message,
         }));
+
         if (data.status === "completed" && data.downloadUrl) {
+          const filename = data.filename || "vidora-download";
+          setState((s) => ({
+            ...s,
+            progress: 95,
+            message: "Saving file to your device\u2026",
+          }));
+
+          // Fetch as blob so the browser actually downloads (cross-origin <a download> is ignored)
+          const objectUrl = await triggerBlobDownload(data.downloadUrl, filename);
+
           setState({
             status: "success",
             progress: 100,
-            downloadUrl: data.downloadUrl,
-            filename: data.filename,
+            downloadUrl: objectUrl,
+            filename,
           });
-          const a = document.createElement("a");
-          a.href = data.downloadUrl;
-          a.download = data.filename || "download";
-          a.click();
           return;
         }
+
         if (data.status === "failed") {
           throw new Error(data.error || "Processing failed");
         }
       } catch (err) {
-        if (err instanceof Error && err.message !== "Failed to fetch") {
-          // only rethrow real job failures, keep polling on network blips
-          if (String(err.message).includes("Processing") || String(err.message).includes("failed")) {
+        if (err instanceof Error) {
+          const m = err.message;
+          if (
+            m.includes("Processing") ||
+            m.includes("failed") ||
+            m.includes("Could not download") ||
+            m.includes("timed out")
+          ) {
             throw err;
           }
         }
@@ -194,38 +223,40 @@ export function Downloader() {
       if (contentType.includes("application/json")) {
         const data = await res.json();
         if (data.downloadUrl) {
+          const filename = data.filename || "vidora-download";
+          const objectUrl = await triggerBlobDownload(data.downloadUrl, filename);
           setState({
             status: "success",
             progress: 100,
-            downloadUrl: data.downloadUrl,
-            filename: data.filename || "vidora-download",
+            downloadUrl: objectUrl,
+            filename,
           });
-          const a = document.createElement("a");
-          a.href = data.downloadUrl;
-          a.download = data.filename || "download";
-          a.click();
         } else if (data.jobId) {
           await pollJob(data.jobId);
         }
       } else {
+        // Direct file stream response
         const blob = await res.blob();
-        const downloadUrl = URL.createObjectURL(blob);
+        const objectUrl = URL.createObjectURL(blob);
         const disposition = res.headers.get("content-disposition");
         let filename = "vidora-download";
         if (disposition) {
           const match = disposition.match(/filename="?([^\"]+)"?/);
           if (match) filename = match[1];
         }
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
         setState({
           status: "success",
           progress: 100,
-          downloadUrl,
+          downloadUrl: objectUrl,
           filename,
         });
-        const a = document.createElement("a");
-        a.href = downloadUrl;
-        a.download = filename;
-        a.click();
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Download failed";
@@ -435,7 +466,7 @@ export function Downloader() {
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 text-sm text-emerald-600">
                       <CheckCircle2 className="h-5 w-5" />
-                      <span className="font-medium">Ready! Download started.</span>
+                      <span className="font-medium">Ready! File saved to your downloads.</span>
                     </div>
                     {state.downloadUrl && (
                       <a
