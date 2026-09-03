@@ -16,10 +16,9 @@ import {
 } from "lucide-react";
 import {
   cn,
-  isValidMediaUrl,
+  isValidYouTubeUrl,
   extractVideoId,
-  normalizeMediaUrl,
-  isYouTubeUrl,
+  normalizeYouTubeUrl,
 } from "@/lib/utils";
 
 type FormatType = "video" | "audio";
@@ -94,11 +93,11 @@ export function Downloader() {
   const apiBase = getApiBase();
 
   const fetchInfo = useCallback(async () => {
-    if (!isValidMediaUrl(url)) {
+    if (!isValidYouTubeUrl(url)) {
       setState({
         status: "error",
         progress: 0,
-        message: "Please enter a valid YouTube or Instagram URL",
+        message: "Please enter a valid YouTube URL",
       });
       return;
     }
@@ -112,7 +111,7 @@ export function Downloader() {
       return;
     }
 
-    const normalized = normalizeMediaUrl(url);
+    const normalized = normalizeYouTubeUrl(url);
     setState({ status: "fetching", progress: 0 });
     setInfo(null);
 
@@ -133,7 +132,7 @@ export function Downloader() {
       const msg =
         e instanceof Error ? e.message : "Could not fetch video details";
       const id = extractVideoId(url);
-      if (id && isYouTubeUrl(url)) {
+      if (id) {
         setInfo({
           title: "YouTube Video",
           thumbnail: `https://img.youtube.com/vi/${id}/hqdefault.jpg`,
@@ -189,8 +188,7 @@ export function Downloader() {
             m.includes("Could not download") ||
             m.includes("timed out") ||
             m.includes("blocked") ||
-            m.includes("unavailable") ||
-            m.includes("Instagram")
+            m.includes("unavailable")
           ) {
             throw err;
           }
@@ -202,7 +200,7 @@ export function Downloader() {
 
   const startDownload = useCallback(async () => {
     if (!info || !url || !apiBase) return;
-    const normalized = normalizeMediaUrl(url);
+    const normalized = normalizeYouTubeUrl(url);
     setState({
       status: "downloading",
       progress: 5,
@@ -353,7 +351,7 @@ export function Downloader() {
                   setInfo(null);
                 }
               }}
-              placeholder="Paste YouTube or Instagram Reel URL..."
+              placeholder="Paste YouTube URL here..."
               className={cn(
                 "w-full rounded-xl border border-border bg-muted/40 pl-10 pr-3 py-3 text-sm text-foreground",
                 "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
@@ -473,15 +471,15 @@ export function Downloader() {
               <button
                 type="button"
                 onClick={reset}
-                disabled={
-                  state.status === "fetching" || state.status === "downloading"
-                }
                 className={cn(
                   "flex items-center justify-center gap-1.5 rounded-xl px-4 py-3 text-sm font-medium",
                   "border border-border bg-muted/50 text-muted-foreground",
                   "hover:bg-muted hover:text-foreground transition-colors",
                   "disabled:opacity-50 disabled:cursor-not-allowed"
                 )}
+                disabled={
+                  state.status === "fetching" || state.status === "downloading"
+                }
                 title="Clear and start over"
               >
                 <X className="h-4 w-4" />
@@ -557,7 +555,7 @@ export function Downloader() {
       </motion.div>
 
       <p className="mt-4 text-center text-[11px] text-muted-foreground max-w-sm mx-auto">
-        For personal use only. Respect copyright and platform Terms of Service.
+        For personal use only. Respect copyright and YouTube Terms of Service.
       </p>
     </div>
   );
