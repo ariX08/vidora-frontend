@@ -1,0 +1,13 @@
+<svg width="420" height="100" viewBox="0 0 420 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vidoraGradRev" x1="15%" y1="0%" x2="85%" y2="0%">
+      <stop offset="0%" stop-color="#A78BFA"/>
+      <stop offset="100%" stop-color="#67E8F9"/>
+    </linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="97" height="97" rx="22" fill="#FFFFFF" fill-opacity="0.08"/>
+  <path d="M 27 25 L 50 71 L 73 25"
+        fill="none" stroke="url(#vidoraGradRev)" stroke-width="15"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="118" y="66" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="58" letter-spacing="-1.5" fill="#FFFFFF">Vidora</text>
+</svg>
