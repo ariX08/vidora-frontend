@@ -10,7 +10,7 @@ export default function Home() {
         <section className="pt-8 pb-6 sm:pt-10 sm:pb-8 px-4 flex-1">
           <div className="mx-auto max-w-3xl text-center mb-6 sm:mb-8">
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight text-foreground">
-              Download YouTube & Instagram Reels
+              Download YouTube videos
               <span className="block mt-1 bg-gradient-to-r from-violet-600 via-purple-600 to-cyan-500 bg-clip-text text-transparent">
                 beautifully & fast
               </span>
