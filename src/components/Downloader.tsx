@@ -23,7 +23,6 @@ interface VideoInfo {
   thumbnail: string;
   duration: string;
   uploader: string;
-  formats?: { format_id: string; ext: string; resolution?: string; filesize?: number }[];
 }
 
 interface DownloadState {
@@ -49,11 +48,9 @@ const AUDIO_QUALITIES: { value: Quality; label: string }[] = [
 ];
 
 function getApiBase() {
-  const raw = process.env.NEXT_PUBLIC_API_URL || "";
-  return raw.replace(/\/$/, "");
+  return (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 }
 
-/** Fetch a cross-origin file as a blob and trigger a real browser download */
 async function triggerBlobDownload(fileUrl: string, filename: string) {
   const res = await fetch(fileUrl);
   if (!res.ok) throw new Error("Could not download the file from the server");
@@ -65,7 +62,6 @@ async function triggerBlobDownload(fileUrl: string, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // Revoke after a short delay so the download can start
   setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
   return objectUrl;
 }
@@ -84,12 +80,11 @@ export function Downloader() {
       setState({ status: "error", progress: 0, message: "Please enter a valid YouTube URL" });
       return;
     }
-
     if (!apiBase) {
       setState({
         status: "error",
         progress: 0,
-        message: "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel to your Railway URL.",
+        message: "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel.",
       });
       return;
     }
@@ -103,12 +98,10 @@ export function Downloader() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Failed to fetch video info");
       }
-
       const data = await res.json();
       setInfo(data);
       setState({ status: "ready", progress: 0 });
@@ -128,15 +121,14 @@ export function Downloader() {
         progress: 0,
         message:
           msg === "Failed to fetch"
-            ? `Cannot reach backend at ${apiBase}. Check NEXT_PUBLIC_API_URL and that Railway is online.`
+            ? `Cannot reach backend at ${apiBase}.`
             : msg,
       });
     }
   }, [url, apiBase]);
 
   const pollJob = async (jobId: string) => {
-    const maxAttempts = 120;
-    for (let i = 0; i < maxAttempts; i++) {
+    for (let i = 0; i < 120; i++) {
       await new Promise((r) => setTimeout(r, 1500));
       try {
         const res = await fetch(`${apiBase}/api/job/${jobId}`);
@@ -147,39 +139,18 @@ export function Downloader() {
           progress: data.progress || s.progress,
           message: data.message || s.message,
         }));
-
         if (data.status === "completed" && data.downloadUrl) {
           const filename = data.filename || "vidora-download";
-          setState((s) => ({
-            ...s,
-            progress: 95,
-            message: "Saving file to your device\u2026",
-          }));
-
-          // Fetch as blob so the browser actually downloads (cross-origin <a download> is ignored)
+          setState((s) => ({ ...s, progress: 95, message: "Saving file\u2026" }));
           const objectUrl = await triggerBlobDownload(data.downloadUrl, filename);
-
-          setState({
-            status: "success",
-            progress: 100,
-            downloadUrl: objectUrl,
-            filename,
-          });
+          setState({ status: "success", progress: 100, downloadUrl: objectUrl, filename });
           return;
         }
-
-        if (data.status === "failed") {
-          throw new Error(data.error || "Processing failed");
-        }
+        if (data.status === "failed") throw new Error(data.error || "Processing failed");
       } catch (err) {
         if (err instanceof Error) {
           const m = err.message;
-          if (
-            m.includes("Processing") ||
-            m.includes("failed") ||
-            m.includes("Could not download") ||
-            m.includes("timed out")
-          ) {
+          if (m.includes("failed") || m.includes("Could not download") || m.includes("timed out")) {
             throw err;
           }
         }
@@ -189,60 +160,36 @@ export function Downloader() {
   };
 
   const startDownload = useCallback(async () => {
-    if (!info || !url) return;
-
-    if (!apiBase) {
-      setState({
-        status: "error",
-        progress: 0,
-        message: "Backend URL is not configured. Set NEXT_PUBLIC_API_URL in Vercel.",
-      });
-      return;
-    }
-
+    if (!info || !url || !apiBase) return;
     setState({ status: "downloading", progress: 5, message: "Starting download\u2026" });
-
     try {
       const res = await fetch(`${apiBase}/api/download`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: url.trim(),
-          type: formatType,
-          quality,
-        }),
+        body: JSON.stringify({ url: url.trim(), type: formatType, quality }),
       });
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Download failed");
       }
-
       const contentType = res.headers.get("content-type") || "";
-
       if (contentType.includes("application/json")) {
         const data = await res.json();
         if (data.downloadUrl) {
           const filename = data.filename || "vidora-download";
           const objectUrl = await triggerBlobDownload(data.downloadUrl, filename);
-          setState({
-            status: "success",
-            progress: 100,
-            downloadUrl: objectUrl,
-            filename,
-          });
+          setState({ status: "success", progress: 100, downloadUrl: objectUrl, filename });
         } else if (data.jobId) {
           await pollJob(data.jobId);
         }
       } else {
-        // Direct file stream response
         const blob = await res.blob();
         const objectUrl = URL.createObjectURL(blob);
-        const disposition = res.headers.get("content-disposition");
         let filename = "vidora-download";
+        const disposition = res.headers.get("content-disposition");
         if (disposition) {
-          const match = disposition.match(/filename="?([^\"]+)"?/);
-          if (match) filename = match[1];
+          const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^\";]+)/i);
+          if (match) filename = decodeURIComponent(match[1].replace(/"/g, ""));
         }
         const a = document.createElement("a");
         a.href = objectUrl;
@@ -251,31 +198,21 @@ export function Downloader() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
-        setState({
-          status: "success",
-          progress: 100,
-          downloadUrl: objectUrl,
-          filename,
-        });
+        setState({ status: "success", progress: 100, downloadUrl: objectUrl, filename });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Download failed";
       setState({
         status: "error",
         progress: 0,
-        message:
-          msg === "Failed to fetch"
-            ? `Cannot reach backend at ${apiBase}. Is Railway online?`
-            : msg,
+        message: msg === "Failed to fetch" ? `Cannot reach backend at ${apiBase}.` : msg,
       });
     }
   }, [info, url, formatType, quality, apiBase]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (state.status === "ready" || state.status === "success") {
-      startDownload();
-    } else if (state.status === "error" && info) {
+    if (state.status === "ready" || state.status === "success" || (state.status === "error" && info)) {
       startDownload();
     } else {
       fetchInfo();
@@ -290,17 +227,51 @@ export function Downloader() {
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto">
+    <div className="w-full max-w-xl mx-auto">
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="rounded-2xl bg-white border border-border shadow-xl shadow-violet-500/5 overflow-hidden"
+        className="rounded-2xl bg-card border border-border shadow-xl shadow-violet-500/5 overflow-hidden"
       >
-        <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-5">
+        {/* Video preview at TOP so it is always visible without scrolling */}
+        <AnimatePresence>
+          {info && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="border-b border-border bg-muted/40"
+            >
+              <div className="p-4 flex gap-3 items-center">
+                <div className="relative w-24 sm:w-28 shrink-0 aspect-video rounded-lg overflow-hidden bg-muted">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={info.thumbnail} alt="" className="w-full h-full object-cover" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold text-sm leading-snug line-clamp-2 text-foreground">
+                    {info.title}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {info.uploader}
+                    {info.duration !== "\u2014" && ` \u00b7 ${info.duration}`}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={reset}
+                    className="mt-1.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    Clear & start over
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4">
           <div className="relative">
-            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-violet-400">
-              <Link2 className="h-5 w-5" />
+            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-primary/70">
+              <Link2 className="h-4 w-4" />
             </div>
             <input
               type="url"
@@ -314,15 +285,14 @@ export function Downloader() {
               }}
               placeholder="Paste YouTube URL here\u2026"
               className={cn(
-                "w-full rounded-xl border border-border bg-muted/40 pl-11 pr-4 py-3.5 text-[15px]",
-                "placeholder:text-foreground/40 focus:outline-none focus:ring-2 focus:ring-violet-400/50 focus:border-violet-400",
-                "transition-all"
+                "w-full rounded-xl border border-border bg-muted/40 pl-10 pr-3 py-3 text-sm text-foreground",
+                "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
               )}
               disabled={state.status === "fetching" || state.status === "downloading"}
             />
           </div>
 
-          <div className="flex gap-2 p-1 rounded-xl bg-muted/60">
+          <div className="flex gap-1.5 p-1 rounded-xl bg-muted/60">
             <button
               type="button"
               onClick={() => {
@@ -330,10 +300,10 @@ export function Downloader() {
                 setQuality("best");
               }}
               className={cn(
-                "flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all",
+                "flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all",
                 formatType === "video"
-                  ? "bg-white text-violet-700 shadow-sm"
-                  : "text-foreground/60 hover:text-foreground"
+                  ? "bg-card text-violet-600 dark:text-violet-300 shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Video className="h-4 w-4" />
@@ -346,10 +316,10 @@ export function Downloader() {
                 setQuality("192k");
               }}
               className={cn(
-                "flex-1 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-all",
+                "flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-all",
                 formatType === "audio"
-                  ? "bg-white text-fuchsia-700 shadow-sm"
-                  : "text-foreground/60 hover:text-foreground"
+                  ? "bg-card text-fuchsia-600 dark:text-fuchsia-300 shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Music className="h-4 w-4" />
@@ -358,20 +328,20 @@ export function Downloader() {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-foreground/50 mb-1.5 uppercase tracking-wider">
+            <label className="block text-[11px] font-medium text-muted-foreground mb-1.5 uppercase tracking-wider">
               Quality
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
               {(formatType === "video" ? VIDEO_QUALITIES : AUDIO_QUALITIES).map((q) => (
                 <button
                   key={q.value}
                   type="button"
                   onClick={() => setQuality(q.value)}
                   className={cn(
-                    "rounded-lg border px-3 py-2 text-sm transition-all",
+                    "rounded-lg border px-2 py-1.5 text-xs transition-all",
                     quality === q.value
-                      ? "border-violet-400 bg-violet-50 text-violet-700 font-medium"
-                      : "border-border bg-white text-foreground/70 hover:border-violet-200"
+                      ? "border-primary bg-primary/10 text-primary font-medium"
+                      : "border-border bg-card text-muted-foreground hover:border-primary/40"
                   )}
                 >
                   {q.label}
@@ -382,47 +352,37 @@ export function Downloader() {
 
           <button
             type="submit"
-            disabled={
-              !url.trim() ||
-              state.status === "fetching" ||
-              state.status === "downloading"
-            }
+            disabled={!url.trim() || state.status === "fetching" || state.status === "downloading"}
             className={cn(
-              "w-full flex items-center justify-center gap-2 rounded-xl py-3.5 text-[15px] font-semibold text-white",
-              "bg-gradient-to-r from-violet-600 via-purple-600 to-fuchsia-600",
-              "hover:from-violet-500 hover:via-purple-500 hover:to-fuchsia-500",
-              "shadow-lg shadow-violet-500/25 transition-all",
-              "disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none"
+              "w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white",
+              "bg-gradient-to-r from-violet-600 via-purple-600 to-cyan-500",
+              "hover:opacity-95 shadow-lg shadow-violet-500/20 transition-all",
+              "disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
             )}
           >
             {state.status === "fetching" && (
               <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Fetching info\u2026
+                <Loader2 className="h-4 w-4 animate-spin" /> Fetching info\u2026
               </>
             )}
             {state.status === "downloading" && (
               <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Processing\u2026 {state.progress}%
+                <Loader2 className="h-4 w-4 animate-spin" /> Processing\u2026 {state.progress}%
               </>
             )}
             {(state.status === "idle" || (state.status === "error" && !info)) && (
               <>
-                <Sparkles className="h-5 w-5" />
-                Get Video Info
+                <Sparkles className="h-4 w-4" /> Get Video Info
               </>
             )}
             {(state.status === "ready" || state.status === "success") && (
               <>
-                <Download className="h-5 w-5" />
-                Download {formatType === "audio" ? "MP3" : "Video"}
+                <Download className="h-4 w-4" /> Download {formatType === "audio" ? "MP3" : "Video"}
               </>
             )}
             {state.status === "error" && info && (
               <>
-                <Download className="h-5 w-5" />
-                Retry Download
+                <Download className="h-4 w-4" /> Retry Download
               </>
             )}
           </button>
@@ -436,45 +396,43 @@ export function Downloader() {
               exit={{ height: 0, opacity: 0 }}
               className="border-t border-border"
             >
-              <div className="px-5 sm:px-6 py-4">
+              <div className="px-4 sm:px-5 py-3">
                 {state.status === "downloading" && (
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-foreground/70">{state.message || "Working\u2026"}</span>
-                      <span className="font-medium text-violet-600">{state.progress}%</span>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">{state.message}</span>
+                      <span className="font-medium text-primary">{state.progress}%</span>
                     </div>
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <motion.div
-                        className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
-                        initial={{ width: 0 }}
+                        className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-400"
                         animate={{ width: `${state.progress}%` }}
-                        transition={{ duration: 0.3 }}
                       />
                     </div>
                   </div>
                 )}
                 {state.status === "error" && (
-                  <div className="flex items-start gap-3 text-sm text-red-600">
-                    <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-2 text-sm text-red-500">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-medium">Something went wrong</p>
-                      <p className="text-red-500/80 mt-0.5">{state.message}</p>
+                      <p className="text-red-400/90 text-xs mt-0.5">{state.message}</p>
                     </div>
                   </div>
                 )}
                 {state.status === "success" && (
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 text-sm text-emerald-600">
-                      <CheckCircle2 className="h-5 w-5" />
-                      <span className="font-medium">Ready! File saved to your downloads.</span>
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <div className="flex items-center gap-2 text-emerald-500">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span className="font-medium">Saved to your downloads</span>
                     </div>
                     {state.downloadUrl && (
                       <a
                         href={state.downloadUrl}
                         download={state.filename}
-                        className="text-sm font-medium text-violet-600 hover:text-violet-700 flex items-center gap-1"
+                        className="text-xs font-medium text-primary hover:underline flex items-center gap-1"
                       >
-                        Save again <ExternalLink className="h-3.5 w-3.5" />
+                        Save again <ExternalLink className="h-3 w-3" />
                       </a>
                     )}
                   </div>
@@ -483,49 +441,10 @@ export function Downloader() {
             </motion.div>
           )}
         </AnimatePresence>
-
-        <AnimatePresence>
-          {info && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="border-t border-border bg-muted/30"
-            >
-              <div className="p-5 sm:p-6 flex gap-4">
-                <div className="relative w-28 sm:w-36 shrink-0 aspect-video rounded-lg overflow-hidden bg-muted shadow-sm">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={info.thumbnail}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-[15px] leading-snug line-clamp-2">
-                    {info.title}
-                  </h3>
-                  <p className="mt-1 text-sm text-foreground/50">
-                    {info.uploader}
-                    {info.duration !== "\u2014" && ` \u00b7 ${info.duration}`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={reset}
-                    className="mt-3 text-xs font-medium text-violet-600 hover:text-violet-700"
-                  >
-                    Clear & start over
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </motion.div>
 
-      <p className="mt-6 text-center text-xs text-foreground/40 max-w-md mx-auto">
-        Vidora is for personal use. Please respect copyright and YouTube Terms of Service.
-        Downloads are processed on secure servers and files are automatically deleted after 24 hours.
+      <p className="mt-4 text-center text-[11px] text-muted-foreground max-w-sm mx-auto">
+        For personal use only. Respect copyright and YouTube Terms of Service.
       </p>
     </div>
   );
