@@ -10,6 +10,20 @@
   --muted: #f3f0f9;
   --border: #e9e4f5;
   --ring: #a78bfa;
+  --muted-foreground: #6b6280;
+}
+
+.dark {
+  --background: #0f0d14;
+  --foreground: #f4f0ff;
+  --card: #1a1625;
+  --primary: #a78bfa;
+  --primary-foreground: #0f0d14;
+  --accent: #f472b6;
+  --muted: #221c30;
+  --border: #2e2740;
+  --ring: #7c3aed;
+  --muted-foreground: #a89bb8;
 }
 
 @theme inline {
@@ -22,28 +36,33 @@
   --color-muted: var(--muted);
   --color-border: var(--border);
   --color-ring: var(--ring);
+  --color-muted-foreground: var(--muted-foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --radius-xl: 1rem;
-  --radius-2xl: 1.25rem;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Soft gradient background accents */
 .bg-mesh {
-  background-color: #faf9fc;
+  background-color: var(--background);
   background-image:
-    radial-gradient(at 20% 20%, rgba(167, 139, 250, 0.15) 0px, transparent 50%),
-    radial-gradient(at 80% 10%, rgba(236, 72, 153, 0.1) 0px, transparent 50%),
-    radial-gradient(at 50% 80%, rgba(99, 102, 241, 0.12) 0px, transparent 50%);
+    radial-gradient(at 20% 15%, rgba(124, 58, 237, 0.12) 0px, transparent 50%),
+    radial-gradient(at 80% 10%, rgba(34, 211, 238, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 90%, rgba(236, 72, 153, 0.08) 0px, transparent 50%);
 }
 
-/* Custom scrollbar */
+.dark .bg-mesh {
+  background-image:
+    radial-gradient(at 20% 15%, rgba(167, 139, 250, 0.15) 0px, transparent 50%),
+    radial-gradient(at 80% 10%, rgba(34, 211, 238, 0.1) 0px, transparent 50%),
+    radial-gradient(at 50% 90%, rgba(244, 114, 182, 0.1) 0px, transparent 50%);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -52,9 +71,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d4c9ef;
+  background: var(--border);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #b8a5e8;
+  background: var(--ring);
 }
